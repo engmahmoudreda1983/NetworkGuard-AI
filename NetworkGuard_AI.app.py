@@ -267,7 +267,7 @@ with c2:
                 f"{' · simulated values, anonymised names' if ss['ws'] == 'demo' else ''}</div>", unsafe_allow_html=True)
 
 tabs = st.tabs(['🏠 Overview', '🗺️ Single-Line Diagram', '📋 Equipment Data', '⚡ Load Flow', '📉 Voltage Drop', '💥 Short Circuit',
-                '🛡️ Protection Coordination', '🔁 N-1 Contingency', '📄 Combined Report'])
+                '🛡️ Protection Coordination', '🔁 N-1 Contingency', '⚡ Fault Study', '📄 Combined Report'])
 
 # ============================================================== 0. Overview
 with tabs[0]:
@@ -753,8 +753,206 @@ with tabs[7]:
     else:
         st.info('Press Analyze.')
 
-# ============================================================== 8. Combined report
+# ============================================================== 8. Fault study
+@st.cache_resource(show_spinner=False)
+def fg_engine():
+    """FaultGuard engine and its fault-type model (reads disturbance records and event lists)."""
+    import faultguard_core as fg
+    return fg, fg.load_model(pg_paths.model('faultguard_model.pkl'))
+
+
+def faultguard_incidents():
+    """Incidents analysed in FaultGuard on the PowerGuard AI platform (same session)."""
+    try:
+        reg = ss.get('_pg_store', {}).get('faultguard', {}).get('register') or []
+        return pd.DataFrame(reg)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _num(v):
+    try:
+        import re as _re
+        m = _re.search(r'-?\d+(?:\.\d+)?', str(v))
+        return float(m.group(0)) if m else None
+    except Exception:
+        return None
+
+
+def end_of(station, line_row):
+    """'from' or 'to': the line end whose substation name matches a recorder's station name."""
+    sub = dict(zip(D['Buses']['Bus'], D['Buses']['Substation']))
+    st_ = ''.join(ch for ch in str(station).upper() if ch.isalpha())
+    for side, b in (('from', line_row['From Bus']), ('to', line_row['To Bus'])):
+        nm = ''.join(ch for ch in str(sub.get(b, b)).upper() if ch.isalpha()).replace('AL', '', 1) if str(sub.get(b, b)).upper().startswith('AL ') else \
+            ''.join(ch for ch in str(sub.get(b, b)).upper() if ch.isalpha())
+        if st_ and nm and (st_[:3] in nm or nm[:3] in st_):
+            return side
+    return None
+
+
+def read_record_files(files, fg):
+    import zipfile as _z
+    by = {}
+    for f in files:
+        if f.name.lower().endswith('.zip'):
+            with _z.ZipFile(io.BytesIO(f.getvalue())) as z:
+                for n in z.namelist():
+                    if not n.endswith('/'):
+                        by[n.rsplit('/', 1)[-1]] = z.read(n)
+        else:
+            by[f.name] = f.getvalue()
+    low = {n.lower(): n for n in by}
+    out = []
+    for n in by:
+        if n.lower().endswith('.cfg'):
+            dn = low.get(n[:-4].lower() + '.dat')
+            if dn:
+                out.append((n, fg.read_comtrade(by[n].decode('latin-1'), by[dn])))
+    return out
+
+
 with tabs[8]:
+    demo_note()
+    st.markdown("<div class='pg-note'>Study a real fault on a line: take it from <b>FaultGuard</b>, read it from the <b>disturbance records and event "
+                "lists</b> of the relays, or <b>enter it by hand</b>. The fault is placed at the same point of the network, and the calculated currents "
+                "from both ends, the voltage dips and the expected relay operation are compared with what was measured.</div>", unsafe_allow_html=True)
+    if not LINES:
+        st.info('Build the network first: the fault is placed on one of its lines.')
+    else:
+        src = st.radio('Fault from', ['🔍 FaultGuard', '📂 Disturbance records and events', '✍️ Enter by hand'], horizontal=True, key='fs_src')
+        pre = ss.get('fs_pre', {})
+        if src.startswith('🔍'):
+            I = faultguard_incidents()
+            if I.empty:
+                st.caption('No FaultGuard incidents in this session. On the PowerGuard AI platform the incidents analysed in FaultGuard appear here; '
+                           'here you can upload the FaultGuard incidents CSV.')
+                up = st.file_uploader('FaultGuard incidents (CSV)', type=['csv'], key='fs_fgcsv')
+                if up is not None:
+                    I = pd.read_csv(up)
+            if not I.empty:
+                I = I.reset_index(drop=True)
+                lab = [f"{r.get('Incident', i)} · {r.get('Date', '')} · {r.get('Line', '')} · {r.get('Fault Type', '')}" for i, r in I.iterrows()]
+                k = st.selectbox('Incident', range(len(I)), format_func=lambda i: lab[i], key='fs_inc')
+                r = I.iloc[k]
+                ln, sc_ = ng.match_line(r.get('Line', ''), D)
+                loc = _num(r.get('Location (km)')) if 'Location (km)' in r else _num(r.get('Location'))
+                if st.button('Use this incident', key='fs_use_inc'):
+                    ss['fs_pre'] = {'line': ln, 'd_km': loc, 'type': ng.FAULT_OF_TYPE.get(str(r.get('Fault Type', '')).upper(), '1ph'),
+                                    'I_from': _num(r.get('Fault Current (kA)')), 'I_to': None, 'note': f"From FaultGuard incident {r.get('Incident', '')}: "
+                                    f"line '{r.get('Line', '')}' matched to {ln}; the fault current is the recording relay's current, set at the From end - move it if the "
+                                    "record was taken at the other end."}
+                    st.rerun()
+        elif src.startswith('📂'):
+            c1, c2 = st.columns(2)
+            recs_up = c1.file_uploader('Disturbance records (COMTRADE .cfg + .dat or .zip), any number of relays', type=['cfg', 'dat', 'zip'],
+                                       accept_multiple_files=True, key='fs_rec')
+            ev_up = c2.file_uploader('Event lists (PDF, picture, CSV, TXT, Excel), optional', type=['pdf', 'png', 'jpg', 'jpeg', 'csv', 'txt', 'xlsx', 'xls'],
+                                     accept_multiple_files=True, key='fs_ev')
+            if recs_up:
+                fg, model = fg_engine()
+                recs = read_record_files(recs_up, fg)
+                if not recs:
+                    st.warning('No complete record: upload each .cfg with its .dat.')
+                else:
+                    names = ' '.join(f"{rc.get('station', '')} {rc.get('device', '')} {n}" for n, rc in recs)
+                    g, _ = ng.match_line(names, D)
+                    ln = st.selectbox('Line of the fault', LINES, index=LINES.index(g) if g in LINES else 0, key='fs_rec_line')
+                    if st.button('🔎 Read the records', type='primary', key='fs_read'):
+                        with st.spinner('Reading the records with the FaultGuard engine...'):
+                            Lrow = ng.filled(D)[0]['Lines'].set_index('Line').loc[ln]
+                            kv = float(D['Buses'].set_index('Bus').at[Lrow['From Bus'], 'kV'])
+                            line_d = {'length_km': float(Lrow['Length km']), 'r1': float(Lrow['R1 ohm/km']), 'x1': float(Lrow['X1 ohm/km']),
+                                      'r0': float(Lrow['R0 ohm/km']), 'x0': float(Lrow['X0 ohm/km']), 'kv': kv}
+                            events = []
+                            for f in ev_up or []:
+                                try:
+                                    e = fg.parse_events(f.getvalue(), f.name)
+                                    if len(e):
+                                        events.append((f.name, e))
+                                except Exception:
+                                    pass
+                            try:
+                                a, rec = fg.analyze_incident(recs, events or None, None, line_d, None, model=model)
+                                ends = {}
+                                for n, rc in recs:
+                                    try:
+                                        ai = fg.analyze(rc, None, line_d, None, model=model)
+                                        side = end_of(rc.get('station', '') or n, Lrow.to_dict())
+                                        if side and ai.get('I_fault_max_kA'):
+                                            ends[side] = (ai['I_fault_max_kA'], ai.get('loc_km'), rc.get('station', '') or n)
+                                    except Exception:
+                                        continue
+                                main_side = end_of(rec.get('station', ''), Lrow.to_dict()) or 'from'
+                                if not ends and a.get('I_fault_max_kA'):     # recorder station not recognised: its current goes to the From end
+                                    ends[main_side] = (a['I_fault_max_kA'], a.get('loc_km'), rec.get('station', '') or 'record')
+                                loc = a.get('loc_km')
+                                d_from = (Lrow['Length km'] - loc) if (loc is not None and main_side == 'to') else loc
+                                ss['fs_pre'] = {'line': ln, 'd_km': d_from, 'type': ng.FAULT_OF_TYPE.get(str(a.get('type', '')).upper(), '1ph'),
+                                                'I_from': ends.get('from', (None,))[0], 'I_to': ends.get('to', (None,))[0],
+                                                'note': f"Records: {', '.join(n for n, _ in recs)}. FaultGuard: {a.get('type')} fault, "
+                                                        f"{a.get('I_fault_max_kA', 0):.2f} kA, {('%.1f km from ' % loc + str(rec.get('station') or 'the recording end')) if loc is not None else 'not located'}."
+                                                        + ''.join(f" {s.title()} end ({v[2]}): {v[0]:.2f} kA." for s, v in ends.items())}
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f'Could not analyse the records: {e}')
+        pre = ss.get('fs_pre', {})
+        if pre.get('note'):
+            st.info(pre['note'])
+        st.markdown('##### Fault')
+        c1, c2, c3, c4 = st.columns([2, 1, 1.3, 1])
+        ln = c1.selectbox('Line', LINES, index=LINES.index(pre['line']) if pre.get('line') in LINES else 0, key=f"fs_line_{pre.get('line')}")
+        Lr = ng.filled(D)[0]['Lines'].set_index('Line').loc[ln]
+        Lkm = float(Lr['Length km']) if pd.notna(Lr['Length km']) else 100.0
+        dk = c2.number_input(f"Distance from {Lr['From Bus']} (km)", 0.0, Lkm, float(min(max(pre.get('d_km') or Lkm / 2, 0.0), Lkm)), 0.5, key=f"fs_d_{pre.get('d_km')}_{ln}")
+        typ = c3.selectbox('Fault type', ['1ph', '2ph', '3ph'], index=['1ph', '2ph', '3ph'].index(pre.get('type', '1ph')), format_func=ng.FAULT_LABEL.get, key=f"fs_t_{pre.get('type')}")
+        rf = c4.number_input('Fault resistance (Ω)', 0.0, 300.0, 0.0, 1.0, key='fs_rf')
+        c1, c2, c3 = st.columns(3)
+        mf = c1.number_input(f"Measured current from {Lr['From Bus']} (kA, 0 = not known)", 0.0, 200.0, float(pre.get('I_from') or 0.0), 0.01, key=f"fs_if_{pre.get('I_from')}")
+        mt = c2.number_input(f"Measured current from {Lr['To Bus']} (kA, 0 = not known)", 0.0, 200.0, float(pre.get('I_to') or 0.0), 0.01, key=f"fs_it_{pre.get('I_to')}")
+        ml = c3.number_input('Location reported by the relays / FaultGuard (km from the From end, 0 = not known)', 0.0, Lkm, float(min(pre.get('d_km') or 0.0, Lkm)), 0.5,
+                             key=f"fs_ml_{pre.get('d_km')}_{ln}")
+        if st.button('⚡ Analyze the fault', type='primary', key='fs_go') and ready():
+            with st.spinner('Fault on the line, currents from both ends and relay operation...'):
+                try:
+                    meas = {'I_from': mf or None, 'I_to': mt or None, 'loc_km': ml or None}
+                    fs = ng.fault_study(D, ln, dk, typ, rf, measured=meas)
+                    fs['estimate'] = ng.locate_from_currents(D, ln, typ, rf, mf or None, mt or None) if (mf or mt) else None
+                    set_res(fs=fs)
+                except Exception as e:
+                    st.error(f'Fault study failed: {e}')
+        fs = res().get('fs')
+        if fs:
+            kpis([('Fault', f"{ng.FAULT_LABEL[fs['fault']]} at {fs['d_km']:.1f} km ({fs['pos'] * 100:.0f}%)"), ('Total current', f"{fs['Ik (kA)']:.2f} kA"),
+                  (f"From {fs['from']}", f"{fs['I_from (kA)']:.2f} kA"), (f"From {fs['to']}", f"{fs['I_to (kA)']:.2f} kA")])
+            if fs.get('estimate'):
+                e = fs['estimate']
+                st.markdown(f"<div class='pg-note'>📍 Location that best matches the measured currents: <b>{e['loc_km']:.1f} km</b> from {fs['from']} "
+                            f"(remaining difference {e['rms_error_pct']:.1f} %).</div>", unsafe_allow_html=True)
+            if len(fs['compare']):
+                st.markdown('##### Calculated against measured'); show(fs['compare'])
+                st.caption('NORMAL within 10 %, WATCH 10-25 %, ACTION above 25 %. A large difference points to network data to check: the fault level of the '
+                           'neighbouring grids, the line impedance, or the fault resistance.')
+            st.plotly_chart(npl.sld_figure(D, fault_line=(fs['line'], fs['pos']), height=560), width=STRETCH, key='fs_sld')
+            st.markdown('##### Expected relay operation')
+            if len(fs['relays']):
+                show(fs['relays'])
+            else:
+                st.info('No relays on this line or the next lines in the relay table.')
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown('##### Voltage during the fault')
+                if len(fs['buses']):
+                    st.dataframe(fs['buses'], hide_index=True, width=STRETCH)
+                else:
+                    st.caption('Bus voltages are given for three-phase faults.')
+            with c2:
+                st.markdown('##### Current in every branch')
+                st.dataframe(fs['branches'], hide_index=True, width=STRETCH, height=360)
+            st.download_button('📄 Fault study report (PDF)', pdfrep.study_pdf(D, {'fs': fs}, 'Fault Study', ss['names'][ss['ws']]), 'Fault_Study.pdf', key='fs_pdf')
+
+# ============================================================== 9. Combined report
+with tabs[9]:
     demo_note()
     st.markdown("<div class='pg-note'>One report with every analysis that has been run on this network. "
                 "Press <b>Run all analyses</b> to run them all with the default settings.</div>", unsafe_allow_html=True)
@@ -770,7 +968,7 @@ with tabs[8]:
             except Exception as e:
                 st.error(f'An analysis failed: {e}')
     R = res()
-    done = [nm for k, ic, nm, _ in ANALYSES if k in R]
+    done = [nm for k, ic, nm, _ in ANALYSES if k in R] + (['Fault Study'] if 'fs' in R else [])
     st.write('Included: ' + (', '.join(done) if done else 'nothing yet'))
     inc_v = st.checkbox('Add the verification document of the calculation engine to the report (appendix)', key='rp_val',
                         help='The engine checked against the IEEE 9 and 14 bus published results, IEC 60909 hand calculations and the IEC 60255 relay curves.')
@@ -796,6 +994,8 @@ with tabs[8]:
                 z.writestr('distance_zones.csv', R['prot']['distance'].to_csv(index=False)); z.writestr('overcurrent_grading.csv', R['prot']['oc_pairs'].to_csv(index=False))
             if 'cont' in R:
                 z.writestr('n1_contingency.csv', R['cont']['table'].to_csv(index=False))
+            if 'fs' in R:
+                z.writestr('fault_study_relays.csv', R['fs']['relays'].to_csv(index=False)); z.writestr('fault_study_branches.csv', R['fs']['branches'].to_csv(index=False))
             z.writestr('network.xlsx', ng.network_excel(D))
         b2.download_button('🗂️ All results (CSV + network Excel, ZIP)', zb.getvalue(), 'NetworkGuard_Results.zip', 'application/zip', width=STRETCH)
         if st.button('📌 Save this study to the history', key='rp_save'):

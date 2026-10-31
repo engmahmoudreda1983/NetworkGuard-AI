@@ -31,7 +31,7 @@ def _ends(lay, a, b, off):
     return (x1 + sx + px, y1 + py), (x2 - sx + px, y2 + py)
 
 
-def sld_figure(data, lf=None, scr=None, fault=None, select=None, height=720, mode='network'):
+def sld_figure(data, lf=None, scr=None, fault=None, select=None, height=720, mode='network', fault_line=None):
     """Plotly single-line diagram. mode: 'network' (voltage colours), 'lf' (loading and voltage), 'sc' (fault levels)."""
     d = ng.clean(data)
     lay = ng.sld_layout(d)
@@ -159,6 +159,14 @@ def sld_figure(data, lf=None, scr=None, fault=None, select=None, height=720, mod
             if c[1] == select[1]:
                 fig.add_trace(go.Scatter(x=[x], y=[y], mode='markers', marker=dict(size=20, color='rgba(47,128,237,.25)', line=dict(color='#2f80ed', width=2)),
                                          hoverinfo='skip', showlegend=False))
+    if fault_line:
+        ln_, pos_ = fault_line
+        br_ = next((b for b in lay['branches'] if b['id'] == ln_ and b['kind'] == 'Line'), None)
+        if br_ and br_['a'] in lay['pos'] and br_['b'] in lay['pos']:
+            (x1, y1), (x2, y2) = _ends(lay, br_['a'], br_['b'], br_['off'])
+            fx, fy = x1 + (x2 - x1) * pos_, y1 + (y2 - y1) * pos_
+            fig.add_trace(go.Scatter(x=[fx], y=[fy], mode='markers+text', marker=dict(size=28, symbol='star', color='#facc15', line=dict(color='#d63a3a', width=2)),
+                                     text=[f'⚡ {ln_}'], textposition='top center', textfont=dict(color='#d63a3a', size=12), hoverinfo='skip', showlegend=False))
     if fault and fault in lay['pos']:
         x, y = lay['pos'][fault]
         fig.add_trace(go.Scatter(x=[x], y=[y + 0.02], mode='markers+text', marker=dict(size=26, symbol='star', color='#facc15', line=dict(color='#d63a3a', width=2)),

@@ -229,6 +229,9 @@ def _strs(P):
 
 def guess_line(sts, data):
     """The line a settings file belongs to, from its description (e.g. '21A SILAA L12'): best matching line name."""
+    ln, sc_ = ng.match_line(sts.get('description') or '', data)
+    if ln and sc_ >= 2:
+        return ln
     d = ng.clean(data)
     desc = (sts.get('description') or '').upper()
     toks = [t for t in re.split(r'[^A-Z0-9]+', desc) if len(t) >= 2]
@@ -462,8 +465,7 @@ def sld_from_pdf(data):
     for n, a, b, pos in sorted(circ):
         sa, sb = codes.get(a), codes.get(b)
         if sa and sb and sa is not sb:
-            L.append({'Line': f"{sa['name']}-{sb['name']}/{n % 10 or n}", 'From Bus': hv[sa['name']], 'To Bus': hv[sb['name']], 'Type': 'OHL',
-                      'Circuit Code': f'{n}_{a}_{b}'})
+            L.append({'Line': f'{n}_{a}_{b}', 'Other Names': f"{sa['name']}-{sb['name']}", 'From Bus': hv[sa['name']], 'To Bus': hv[sb['name']], 'Type': 'OHL'})
         else:
             inside = sa or sb
             other = b if inside is sa else a

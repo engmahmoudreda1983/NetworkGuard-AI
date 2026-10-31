@@ -224,6 +224,20 @@ def study_pdf(data, res, title='Network Study', network_name='Network', engineer
     ct = res.get('cont')
     if ct:
         s += [PageBreak(), Paragraph('N-1 contingency', H2), _table(ct['table'], W)]
+    fs = res.get('fs')
+    if fs:
+        s += [PageBreak(), Paragraph(f"Fault study: {fs['line']}", H2),
+              _kpis([('Fault', f"{fs['fault']} at {fs['d_km']:.1f} km"), ('Total', f"{fs['Ik (kA)']:.2f} kA"), (f"From {fs['from']}", f"{fs['I_from (kA)']:.2f} kA"),
+                     (f"From {fs['to']}", f"{fs['I_to (kA)']:.2f} kA")], W)]
+        if fs.get('estimate'):
+            s.append(Paragraph(f"Location that best matches the measured currents: {fs['estimate']['loc_km']:.1f} km from {fs['from']}.", TXT))
+        if len(fs['compare']):
+            s += [Paragraph('Calculated against measured', H2), _table(fs['compare'], W)]
+        s.append(_img(npl.sld_matplotlib(data, fault=None), W, 95 * mm))
+        if len(fs['relays']):
+            s += [Paragraph('Expected relay operation', H2), _table(fs['relays'], W, status_col=None)]
+        if len(fs['buses']):
+            s += [Paragraph('Voltage during the fault', H2), _table(fs['buses'], W, status_col=None)]
     va = res.get('val')
     if va is not None:
         s += [PageBreak()] + _verification_body(va, W, appendix=True)

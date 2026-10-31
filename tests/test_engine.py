@@ -29,11 +29,19 @@ def test_demo_network_runs():
     assert len(ng.contingency(D)['table'])
 
 
+def test_fault_study():
+    D = ng.demo()
+    fs = ng.fault_study(D, 'CH-CJ/1', 100, '1ph')
+    assert fs['Ik (kA)'] > 0 and abs(fs['I_from (kA)'] + fs['I_to (kA)'] - fs['Ik (kA)']) < 0.05 * fs['Ik (kA)']
+    est = ng.locate_from_currents(D, 'CH-CJ/1', '1ph', 0, fs['I_from (kA)'], fs['I_to (kA)'])
+    assert abs(est['loc_km'] - 100) < 3
+
+
 def test_line_parameters():
     p = ng.line_parameters('Flint AAAC 740.8 kcmil', '400 kV double-circuit, quad bundle')
     assert 0.2 < p['x1'] < 0.35 and 10 < p['c1'] < 16 and p['x0'] > 2 * p['x1']
 
 
 if __name__ == '__main__':
-    for f in (test_published_results, test_demo_network_runs, test_line_parameters):
+    for f in (test_published_results, test_demo_network_runs, test_fault_study, test_line_parameters):
         f(); print('PASS', f.__name__)
