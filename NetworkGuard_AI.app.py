@@ -791,11 +791,11 @@ with tabs[8]:
                 z.writestr('n1_contingency.csv', R['cont']['table'].to_csv(index=False))
             z.writestr('network.xlsx', ng.network_excel(D))
         b2.download_button('🗂️ All results (CSV + network Excel, ZIP)', zb.getvalue(), 'NetworkGuard_Results.zip', 'application/zip', width=STRETCH)
-    st.download_button('📘 Verification document of the calculation engine (PDF)', pdfrep.verification_pdf(verification_table()),
-                       'NetworkGuard_Verification.pdf', 'application/pdf', key='rp_vdoc')
         if st.button('📌 Save this study to the history', key='rp_save'):
             ss['studies'] = ss['studies'] + [{'Date': datetime.now().strftime('%Y-%m-%d %H:%M'), 'Network': ss['names'][ss['ws']], 'Title': ttl,
                                                **{nm: (STATUS_LABEL.get(status_of(k, R[k]), '') + ' · ' + headline(k, R[k])) for k, ic, nm, _ in ANALYSES if k in R}}]
+    st.download_button('📘 Verification document of the calculation engine (PDF)', pdfrep.verification_pdf(verification_table()),
+                       'NetworkGuard_Verification.pdf', 'application/pdf', key='rp_vdoc')
     if ss['studies']:
         st.markdown('##### Study history')
         st.dataframe(pd.DataFrame(ss['studies']), width=STRETCH, hide_index=True)
