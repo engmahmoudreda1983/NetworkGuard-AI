@@ -23,7 +23,7 @@ STATUS_LABEL = {'EXCELLENT': 'NORMAL', 'WATCH': 'WATCH', 'ACTION': 'ACTION', 'OU
 SRC_PAGES, SRC_DEMO = 'Results from the analysis pages', 'Demo network (simulated, anonymised)'
 ANALYSES = [('lf', '⚡', 'Load Flow', 'Voltages, flows, loading and losses'), ('vd', '📉', 'Voltage Drop', 'Voltage along every circuit and bus limits'),
             ('sc', '💥', 'Short Circuit', 'IEC 60909 fault levels and breaker duty'), ('prot', '🛡️', 'Protection Coordination', 'Distance zones and overcurrent grading'),
-            ('cont', '🔁', 'N-1 Contingency', 'Outage of every circuit and transformer'), ('val', '✅', 'Validation', 'Engine checked against published results')]
+            ('cont', '🔁', 'N-1 Contingency', 'Outage of every circuit and transformer')]
 
 st.markdown("""
 <style>
@@ -215,6 +215,11 @@ def headline(key, r):
     return ''
 
 
+@st.cache_data(show_spinner=False)
+def verification_table():
+    return ng.validation()
+
+
 def sld(d, key, **kw):
     fig = npl.sld_figure(d, select=ss.get('sel'), **kw)
     ev = st.plotly_chart(fig, width=STRETCH, key=key, on_select='rerun', selection_mode='points', config={'scrollZoom': True, 'displaylogo': False})
@@ -262,7 +267,7 @@ with c2:
                 f"{' · simulated values, anonymised names' if ss['ws'] == 'demo' else ''}</div>", unsafe_allow_html=True)
 
 tabs = st.tabs(['🏠 Overview', '🗺️ Single-Line Diagram', '📋 Equipment Data', '⚡ Load Flow', '📉 Voltage Drop', '💥 Short Circuit',
-                '🛡️ Protection Coordination', '🔁 N-1 Contingency', '📄 Combined Report', '✅ Validation'])
+                '🛡️ Protection Coordination', '🔁 N-1 Contingency', '📄 Combined Report'])
 
 # ============================================================== 0. Overview
 with tabs[0]:
@@ -290,7 +295,7 @@ with tabs[0]:
             if st.button('▶️ Run all analyses on the demo network', type='primary', key='ov_demo_all'):
                 with st.spinner('Running all analyses...'):
                     lf = ng.load_flow(D)
-                    set_res(lf=lf, vd=ng.voltage_drop(lf), sc=ng.short_circuit(D, 'max', 'CJ-400'), prot=ng.protection(D), cont=ng.contingency(D), val=ng.validation())
+                    set_res(lf=lf, vd=ng.voltage_drop(lf), sc=ng.short_circuit(D, 'max', 'CJ-400'), prot=ng.protection(D), cont=ng.contingency(D))
                 st.rerun()
         lf, scr = R.get('lf'), R.get('sc')
         st.markdown('#### Single-line diagram' + (' with the load flow results' if lf else ''))
@@ -750,18 +755,23 @@ with tabs[8]:
     eng = c1.text_input('Prepared by', key='rp_eng')
     ttl = c2.text_input('Report title', 'Network Study Report', key='rp_title')
     if st.button('▶️ Run all analyses', type='primary', key='rp_all') and ready():
-        with st.spinner('Load flow, voltage drop, short circuit, protection, N-1 and validation...'):
+        with st.spinner('Load flow, voltage drop, short circuit, protection and N-1...'):
             try:
                 lf = ng.load_flow(D)
                 set_res(lf=lf, vd=ng.voltage_drop(lf), sc=ng.short_circuit(D, 'max', BUSES[0] if BUSES else None), prot=ng.protection(D),
-                        cont=ng.contingency(D), val=ng.validation())
+                        cont=ng.contingency(D))
             except Exception as e:
                 st.error(f'An analysis failed: {e}')
     R = res()
     done = [nm for k, ic, nm, _ in ANALYSES if k in R]
     st.write('Included: ' + (', '.join(done) if done else 'nothing yet'))
+    inc_v = st.checkbox('Add the verification document of the calculation engine to the report (appendix)', key='rp_val',
+                        help='The engine checked against the IEEE 9 and 14 bus published results, IEC 60909 hand calculations and the IEC 60255 relay curves.')
     if done:
-        pdf = pdfrep.study_pdf(D, R, ttl, ss['names'][ss['ws']], eng)
+        RR = {k: v for k, v in R.items() if k != 'val'}
+        if inc_v:
+            RR['val'] = verification_table()
+        pdf = pdfrep.study_pdf(D, RR, ttl, ss['names'][ss['ws']], eng)
         b1, b2 = st.columns(2)
         b1.download_button('📄 Combined report (PDF)', pdf, f"{ttl.replace(' ', '_')}.pdf", 'application/pdf', type='primary', width=STRETCH)
         zb = io.BytesIO()
@@ -781,28 +791,13 @@ with tabs[8]:
                 z.writestr('n1_contingency.csv', R['cont']['table'].to_csv(index=False))
             z.writestr('network.xlsx', ng.network_excel(D))
         b2.download_button('🗂️ All results (CSV + network Excel, ZIP)', zb.getvalue(), 'NetworkGuard_Results.zip', 'application/zip', width=STRETCH)
+    st.download_button('📘 Verification document of the calculation engine (PDF)', pdfrep.verification_pdf(verification_table()),
+                       'NetworkGuard_Verification.pdf', 'application/pdf', key='rp_vdoc')
         if st.button('📌 Save this study to the history', key='rp_save'):
             ss['studies'] = ss['studies'] + [{'Date': datetime.now().strftime('%Y-%m-%d %H:%M'), 'Network': ss['names'][ss['ws']], 'Title': ttl,
                                                **{nm: (STATUS_LABEL.get(status_of(k, R[k]), '') + ' · ' + headline(k, R[k])) for k, ic, nm, _ in ANALYSES if k in R}}]
     if ss['studies']:
         st.markdown('##### Study history')
         st.dataframe(pd.DataFrame(ss['studies']), width=STRETCH, hide_index=True)
-
-# ============================================================== 9. Validation
-with tabs[9]:
-    st.markdown("<div class='pg-note'>The engine is checked against results that are published for standard test systems and against hand "
-                "calculations with the standard formulas. The same equations give the same results in any program when the data is the same.</div>",
-                unsafe_allow_html=True)
-    if st.button('✅ Run the validation', type='primary', key='va_go'):
-        with st.spinner('IEEE test systems, IEC 60909 and IEC 60255 checks...'):
-            ss['validation'] = ng.validation()
-    va = ss.get('validation')
-    if va is not None:
-        kpis([('Checks', len(va)), ('Pass', int((va['Result'] == 'PASS').sum())), ('Largest difference', f"{va['Difference'].abs().max():.3f}")])
-        show(va, 'Result')
-        st.caption('IEEE 9-bus and 14-bus: published load flow solutions (bus voltages to 3 decimals, angles to 0.01-0.02°). IEC 60909: Ik3, Ik1 and ip of a grid '
-                   'plus 400 kV line computed by hand with the standard formulas. IEC 60255-151: standard inverse and very inverse curve times.')
-    else:
-        st.info('Press Run the validation.')
 
 st.markdown(FOOTER, unsafe_allow_html=True)
