@@ -830,6 +830,34 @@ def validation():
     sc.calc_sc(net, case='max', fault='1ph')
     out.append({'Test': 'IEC 60909 hand calculation', 'Quantity': "Ik1'' at the line end (kA)", 'Published': round(math.sqrt(3) * c * Un / abs(2 * Z1 + Z0), 3),
                 'NetworkGuard': round(net.res_bus_sc.ikss_ka.iloc[1], 3)})
+    # IEC TR 60909-4 example network (grids, transformers, three-winding transformer, power station units, generators, motors)
+    try:
+        import iec60909_4_example as ex
+        import contextlib
+        import io as _io
+        import logging
+        logging.getLogger('pandapower').setLevel(logging.ERROR)
+        quiet = contextlib.redirect_stdout(_io.StringIO())
+
+        def run(fault, case):
+            net = ex.iec_60909_4()
+            if case == 'min':
+                net.line['endtemp_degree'] = 80.0
+                net.ext_grid['s_sc_min_mva'] = net.ext_grid['s_sc_max_mva'] / 10
+                net.ext_grid['rx_min'] = net.ext_grid['rx_max']
+            with quiet:
+                sc.calc_sc(net, fault=fault, case=case, ip=True, tk_s=0.1, kappa_method='C')
+            names = [f"Bus {i + 1} ({kv:g} kV)" for i, kv in enumerate(net.bus.vn_kv)]
+            return net.res_bus_sc, names
+        T4 = 'IEC TR 60909-4 example'
+        for (fault, case, col, ref, q, nd) in (('3ph', 'max', 'ikss_ka', ex.IK3_MAX, "Ik3'' max (kA)", 4), ('3ph', 'max', 'ip_ka', ex.IP3_MAX, 'ip 3-phase (kA)', 4),
+                                               ('3ph', 'max', 'skss_mw', ex.SK3_MAX, "Sk3'' (MVA)", 2), ('3ph', 'min', 'ikss_ka', ex.IK3_MIN, "Ik3'' min (kA)", 4),
+                                               ('2ph', 'max', 'ikss_ka', ex.IK2_MAX, "Ik2'' max (kA)", 4), ('2ph', 'max', 'ip_ka', ex.IP2_MAX, 'ip 2-phase (kA)', 4)):
+            r, names = run(fault, case)
+            for i, v in enumerate(ref):
+                out.append({'Test': T4, 'Quantity': f'{names[i]}: {q}', 'Published': v, 'NetworkGuard': round(float(r[col].iloc[i]), nd)})
+    except Exception as e:      # the example file is missing: say so in the table
+        out.append({'Test': 'IEC TR 60909-4 example', 'Quantity': f'not run ({e})', 'Published': 0.0, 'NetworkGuard': 1.0})
     # relay curve: IEC SI, TMS 0.1, M = 10 -> 0.297 s
     out.append({'Test': 'IEC 60255-151 relay curve', 'Quantity': 'Standard inverse, TMS 0.1, 10 x pickup (s)', 'Published': 0.297,
                 'NetworkGuard': round(float(oc_time(10.0, 1.0, 0.1, 'IEC SI')), 3)})
@@ -837,7 +865,8 @@ def validation():
                 'NetworkGuard': round(float(oc_time(10.0, 1.0, 0.1, 'IEC VI')), 3)})
     T = pd.DataFrame(out)
     T['Difference'] = (T['NetworkGuard'] - T['Published']).round(4)
-    tol = np.where(T['Quantity'].str.contains('angle'), 0.02, np.where(T['Test'].str.startswith('IEEE'), 0.0015, 0.002))
+    tol = np.where(T['Quantity'].str.contains('angle'), 0.02, np.where(T['Test'].str.startswith('IEEE'), 0.0015,
+                   np.where(T['Quantity'].str.contains('MVA'), 0.05, 0.002)))
     T['Result'] = np.where(T['Difference'].abs() <= tol + 1e-9, 'PASS', 'CHECK')
     return T
 

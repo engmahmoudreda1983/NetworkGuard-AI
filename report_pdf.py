@@ -117,9 +117,14 @@ VERIF_TEXT = [
     ('Short circuit', "IEC 60909 equivalent voltage source method: a 400 kV grid of 20 000 MVA (R/X 0.1, X0/X1 1.0, R0/X0 0.1) feeding a 100 km line "
                       "(R1 0.03, X1 0.32, R0 0.2, X0 0.9 ohm/km). Ik3'' = c·Un/(√3·|Z1|), Ik1'' = √3·c·Un/|2Z1 + Z0|, ip = κ·√2·Ik3'' with "
                       "κ = 1.02 + 0.98·e^(-3R/X), c = 1.1, computed by hand and compared."),
+    ('IEC TR 60909-4 example', 'The example network of IEC TR 60909-4 (data for calculations according to IEC 60909): 380/110/30/10 kV with two '
+                               'network feeders, two-winding and three-winding transformers, power station units with generators, asynchronous '
+                               'motors and overhead lines and cables. The three-phase (maximum and minimum) and two-phase initial short-circuit '
+                               "currents Ik'', the peak currents ip (method C) and the short-circuit powers Sk'' at every bus are compared with "
+                               'the results published in the report.'),
     ('Relay curves', 'IEC 60255-151 inverse-time equation t = TMS·k/((I/Is)^α - 1): standard inverse (k 0.14, α 0.02) and very inverse '
                      '(k 13.5, α 1) at ten times the pickup with TMS 0.1.'),
-    ('Acceptance', 'Voltages within 0.0015 pu, angles within 0.02°, currents within 0.002 kA and times within 0.002 s of the reference.'),
+    ('Acceptance', 'Voltages within 0.0015 pu, angles within 0.02°, currents within 0.002 kA, powers within 0.05 MVA and times within 0.002 s of the reference.'),
 ]
 
 
