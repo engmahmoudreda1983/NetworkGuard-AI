@@ -656,6 +656,13 @@ with tabs[5]:
             except Exception as e:
                 st.error(f'Short circuit calculation failed: {e}')
     scr = res().get('sc')
+    if scr and fb and (scr.get('contrib') or {}).get('bus') != fb:
+        # the fault location changed: move the fault and recompute the branch currents (no need to analyze again)
+        try:
+            scr = {**scr, 'contrib': ng.fault_contributions(D, fb, scr.get('case', 'max'))}
+            ss['results'] = {**ss['results'], ss['ws']: {**res(), 'sc': scr}}
+        except Exception as e:
+            st.warning(f'Could not compute the fault at {fb}: {e}')
     if scr:
         T = scr['bus']
         w = T.sort_values('Breaker Duty (%)', ascending=False).iloc[0]
