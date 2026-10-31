@@ -7,3 +7,7 @@ reportlab
 openpyxl
 pillow
 pandapower>=3.1
+pypdf
+pypdfium2
+pytesseract
+scikit-learn

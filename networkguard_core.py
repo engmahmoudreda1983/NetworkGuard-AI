@@ -109,6 +109,13 @@ SCHEMA = {
         'Q MVAr': ('MVAr', 'Reactive power', 0.0, 'num'),
         'In Service': ('', '1 = in service, 0 = out of service', 1, 'num'),
     },
+    'Breakers': {
+        'Breaker': ('', 'Circuit breaker name', None, 'id'),
+        'Bus': ('', 'Bus the breaker connects to', None, 'text'),
+        'Element': ('', 'Line, transformer, reactor or coupler the breaker switches', '', 'text'),
+        'Breaking kA': ('kA', 'Rated short-circuit breaking current', 40.0, 'num'),
+        'Rated A': ('A', 'Rated normal current', 2000.0, 'num'),
+    },
     'Relays': {
         'Relay': ('', 'Relay name', None, 'id'),
         'Element': ('', 'Protected line or transformer', None, 'text'),
@@ -132,9 +139,9 @@ SCHEMA = {
     },
 }
 ORDER = list(SCHEMA)
-TYPE_OF = {'Substations': 'Substation', 'Buses': 'Bus', 'Lines': 'Line', 'Transformers': 'Transformer', 'Reactors': 'Reactor',
+TYPE_OF = {'Substations': 'Substation', 'Buses': 'Bus', 'Lines': 'Line', 'Transformers': 'Transformer', 'Reactors': 'Reactor', 'Breakers': 'Breaker',
            'Grids': 'Grid', 'Converters': 'Converter', 'Loads': 'Load', 'Relays': 'Relay'}
-ICON = {'Substations': '🏢', 'Buses': '➖', 'Lines': '🗼', 'Transformers': '🔁', 'Reactors': '🌀', 'Grids': '🌐', 'Converters': '🔀',
+ICON = {'Substations': '🏢', 'Buses': '➖', 'Lines': '🗼', 'Transformers': '🔁', 'Reactors': '🌀', 'Grids': '🌐', 'Converters': '🔀', 'Breakers': '🔲',
         'Loads': '🏭', 'Relays': '🛡️'}
 
 # conductor library: R20 (ohm/km, one sub-conductor), diameter (mm), GMR factor (GMR = k * radius), alpha (1/degC)
@@ -395,7 +402,7 @@ def validate_links(data):
         if r['Substation'] not in subs:
             err.append(f"Bus {r['Bus']}: substation '{r['Substation']}' not found")
     for k, cols in [('Lines', ['From Bus', 'To Bus']), ('Transformers', ['HV Bus', 'LV Bus']), ('Reactors', ['Bus']), ('Grids', ['Bus']),
-                    ('Converters', ['Bus']), ('Loads', ['Bus']), ('Relays', ['Bus'])]:
+                    ('Converters', ['Bus']), ('Loads', ['Bus']), ('Relays', ['Bus']), ('Breakers', ['Bus'])]:
         for _, r in d[k].iterrows():
             for c in cols:
                 if r[c] not in buses:
@@ -586,6 +593,21 @@ def short_circuit(data, case='max', fault_bus=None):
     T['Status'] = np.where(T[['Breaker Duty (%)', 'Making Duty (%)', 'Short-time Duty (%)']].max(axis=1) > 100, 'ACTION',
                            np.where(T[['Breaker Duty (%)', 'Making Duty (%)', 'Short-time Duty (%)']].max(axis=1) > 90, 'WATCH', 'EXCELLENT'))
     out = {'bus': T, 'case': case}
+    Bk = d['Breakers']
+    if len(Bk):
+        ik = T.set_index('Bus')
+        rows = []
+        for _, b in Bk.iterrows():
+            if b['Bus'] not in ik.index:
+                continue
+            r = ik.loc[b['Bus']]
+            I = max(r['Ik3 (kA)'], r['Ik1 (kA)'])
+            duty = 100 * I / float(b['Breaking kA']) if b['Breaking kA'] else np.nan
+            rows.append({'Breaker': b['Breaker'], 'Bus': b['Bus'], 'Element': b['Element'], 'Fault Current (kA)': round(I, 2), 'Breaking (kA)': b['Breaking kA'],
+                         'Duty (%)': round(duty, 1), 'ip (kA)': r['ip (kA)'], 'Making Duty (%)': round(100 * r['ip (kA)'] / (2.5 * float(b['Breaking kA'])), 1),
+                         'Status': 'ACTION' if max(duty, 100 * r['ip (kA)'] / (2.5 * float(b['Breaking kA']))) > 100 else
+                         ('WATCH' if max(duty, 100 * r['ip (kA)'] / (2.5 * float(b['Breaking kA']))) > 90 else 'EXCELLENT')})
+        out['breakers'] = pd.DataFrame(rows).sort_values('Duty (%)', ascending=False, ignore_index=True) if rows else pd.DataFrame()
     if fault_bus:
         out['contrib'] = fault_contributions(data, fault_bus, case)
     return out
@@ -879,7 +901,89 @@ def demo():
     Rl.loc[Rl['Relay'] == 'IL-IC/1-21A', 'Z1 %'] = 95
     Rl.loc[Rl['Relay'] == 'SH-EG/1-21A', 'T2 s'] = 0.3
     Rl.loc[Rl['Relay'] == 'SH-EG/1-21A', 'T3 s'] = 0.5
-    return clean({'Substations': S, 'Buses': B, 'Lines': L, 'Transformers': T, 'Reactors': Rx, 'Grids': G, 'Converters': C, 'Loads': Ld, 'Relays': Rl})
+    sub_of = dict(zip(B['Bus'], B['Substation']))
+    brk = dict(zip(S['Substation'], S['Breaking kA']))
+    Bk = [{'Breaker': f"{l['Line']} CB-{side}", 'Bus': l[end], 'Element': l['Line'], 'Breaking kA': brk[sub_of[l[end]]], 'Rated A': 2000}
+          for _, l in L.iterrows() for end, side in (('From Bus', 'A'), ('To Bus', 'B'))]
+    Bk += [{'Breaker': f"{t['Transformer']} CB-{side}", 'Bus': t[end], 'Element': t['Transformer'], 'Breaking kA': 50 if side == 'LV' and t['LV kV'] == 275 else 40,
+            'Rated A': 3150} for _, t in T.iterrows() for end, side in (('HV Bus', 'HV'), ('LV Bus', 'LV'))]
+    return clean({'Substations': S, 'Buses': B, 'Lines': L, 'Transformers': T, 'Reactors': Rx, 'Grids': G, 'Converters': C, 'Loads': Ld,
+                  'Breakers': pd.DataFrame(Bk), 'Relays': Rl})
+
+
+# ------------------------------------------------------------------ building a network step by step
+def _append(data, kind, rows):
+    data = clean(data)
+    data[kind] = pd.concat([data[kind], pd.DataFrame(rows)], ignore_index=True)
+    data[kind] = data[kind].drop_duplicates(id_col(kind), keep='last')
+    return clean(data)
+
+
+def next_position(data):
+    S = clean(data)['Substations']
+    n = len(S)
+    return float((n % 4) * 3.0), float(9.0 - (n // 4) * 3.0)
+
+
+def add_substation(data, name, kvs, x=None, y=None, breaking=40.0):
+    if x is None or y is None:
+        x, y = next_position(data)
+    data = _append(data, 'Substations', [{'Substation': name, 'X': x, 'Y': y, 'Breaking kA': breaking, 'Short-time kA (1 s)': breaking, 'Busbar A': 3150}])
+    return _append(data, 'Buses', [{'Bus': f'{name} {kv:g}', 'Substation': name, 'kV': kv, 'Vmin pu': 0.95, 'Vmax pu': 1.05} for kv in kvs])
+
+
+def add_line(data, a, b, circuits=1, length=None, typ='OHL', conductor='', tower='', rating=2000.0, name=None, breakers=True):
+    d = clean(data)
+    sub = dict(zip(d['Buses']['Bus'], d['Buses']['Substation']))
+    base = name or f"{sub.get(a, a)}-{sub.get(b, b)}"
+    rows, bk = [], []
+    brk = dict(zip(d['Substations']['Substation'], d['Substations']['Breaking kA']))
+    for c in range(1, int(circuits) + 1):
+        ln = f'{base}/{c}'
+        rows.append({'Line': ln, 'From Bus': a, 'To Bus': b, 'Type': typ, 'Length km': length, 'Rating A': rating, 'Conductor': conductor, 'Tower': tower, 'In Service': 1})
+        if breakers:
+            bk += [{'Breaker': f'{ln} CB-A', 'Bus': a, 'Element': ln, 'Breaking kA': brk.get(sub.get(a), 40.0), 'Rated A': rating},
+                   {'Breaker': f'{ln} CB-B', 'Bus': b, 'Element': ln, 'Breaking kA': brk.get(sub.get(b), 40.0), 'Rated A': rating}]
+    data = _append(data, 'Lines', rows)
+    return _append(data, 'Breakers', bk) if bk else data
+
+
+def add_transformer(data, hv, lv, count=1, mva=None, uk=None, name=None, breakers=True):
+    d = clean(data)
+    kv = dict(zip(d['Buses']['Bus'], d['Buses']['kV'])); sub = dict(zip(d['Buses']['Bus'], d['Buses']['Substation']))
+    n0 = (d['Transformers']['HV Bus'] == hv).sum()
+    rows, bk = [], []
+    for k in range(1, int(count) + 1):
+        t = f"{name or sub.get(hv, hv) + ' T'}{n0 + k}"
+        rows.append({'Transformer': t, 'HV Bus': hv, 'LV Bus': lv, 'MVA': mva, 'HV kV': kv.get(hv), 'LV kV': kv.get(lv), 'uk %': uk, 'In Service': 1})
+        if breakers:
+            bk += [{'Breaker': f'{t} CB-HV', 'Bus': hv, 'Element': t}, {'Breaker': f'{t} CB-LV', 'Bus': lv, 'Element': t}]
+    data = _append(data, 'Transformers', rows)
+    return _append(data, 'Breakers', bk) if bk else data
+
+
+def add_reactor(data, bus, mvar=None, line='', count=1, name=None):
+    d = clean(data)
+    kv = dict(zip(d['Buses']['Bus'], d['Buses']['kV'])); sub = dict(zip(d['Buses']['Bus'], d['Buses']['Substation']))
+    n0 = (d['Reactors']['Bus'] == bus).sum()
+    return _append(data, 'Reactors', [{'Reactor': f"{name or sub.get(bus, bus) + ' R'}{n0 + k}", 'Bus': bus, 'Line': line, 'MVAr': mvar, 'kV': kv.get(bus), 'In Service': 1}
+                                      for k in range(1, int(count) + 1)])
+
+
+def add_grid(data, name, bus, sk_max=None, sk_min=None, slack=False, p_import=0.0):
+    data = clean(data)
+    if slack:
+        data['Grids']['Slack'] = 0
+    return _append(data, 'Grids', [{'Grid': name, 'Bus': bus, 'Slack': 1 if slack or not len(data['Grids']) else 0, 'P Import MW': p_import, 'V Setpoint pu': 1.0,
+                                    'Sk max MVA': sk_max, 'Sk min MVA': sk_min}])
+
+
+def add_converter(data, name, bus, p=0.0, rated=600.0):
+    return _append(data, 'Converters', [{'Converter': name, 'Bus': bus, 'P MW': p, 'Q MVAr': 0.0, 'Rated MW': rated, 'In Service': 1}])
+
+
+def add_breaker(data, name, bus, element='', breaking=40.0, rated=2000.0):
+    return _append(data, 'Breakers', [{'Breaker': name, 'Bus': bus, 'Element': element, 'Breaking kA': breaking, 'Rated A': rated}])
 
 
 # ------------------------------------------------------------------ single-line diagram geometry
@@ -913,7 +1017,8 @@ def sld_layout(data):
     src = [{'id': r['Grid'], 'kind': 'Grid', 'bus': r['Bus']} for _, r in d['Grids'].iterrows()] + \
           [{'id': r['Converter'], 'kind': 'Converter', 'bus': r['Bus']} for _, r in d['Converters'].iterrows()] + \
           [{'id': r['Load'], 'kind': 'Load', 'bus': r['Bus']} for _, r in d['Loads'].iterrows()]
-    return {'pos': pos, 'subs': subs, 'branches': br, 'shunts': sh, 'sources': src}
+    bk = [{'id': r['Breaker'], 'bus': r['Bus'], 'element': r['Element']} for _, r in d['Breakers'].iterrows()]
+    return {'pos': pos, 'subs': subs, 'branches': br, 'shunts': sh, 'sources': src, 'breakers': bk}
 
 
 # ------------------------------------------------------------------ platform register
