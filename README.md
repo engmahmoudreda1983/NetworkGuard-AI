@@ -29,7 +29,9 @@ or one Excel form per equipment, or one Excel file for the whole network) and dr
 - **Load-flow reference**: any grid or any bus can be the reference (slack); a bus without a grid gets a balancing source used in the
   load flow only (no short-circuit contribution).
 - **Missing values**: each analysis asks only for what it uses (load flow, voltage drop and N-1 do not need the grid fault levels); when
-  values are missing the page opens them in tables to fill and save right there.
+  values are missing the page opens them in tables to fill and save right there, or to download as Excel, fill and upload.
+- **Fault study from files**: the fault's own records, event lists and relay settings are read with the FaultGuard engine inside NetworkGuard
+  (no export needed); incidents analysed in FaultGuard in the same platform session can be picked from a list.
 - Combined PDF report and CSV / Excel downloads.
 
 ## Files
