@@ -25,6 +25,7 @@ or one Excel form per equipment, or one Excel file for the whole network) and dr
 - **Grid short-circuit power from disturbance records** (short-circuit page): at the relay bus the fault-caused voltage and current give
   the source impedance behind the relay (V2 = −Zs·I2, V0 = −Zs0·I0, IEC 60909-0 equivalent source Sk = U²/|Zs|); the model gives the same
   impedance with the faulted circuit out, and the short-circuit power and X0/X1 of the chosen grids are fitted until the model matches the records.
+  Every fault applied from FaultGuard (or read from records) does the same with its own records and offers the new grid values.
 - **Load-flow reference**: any grid or any bus can be the reference (slack); a bus without a grid gets a balancing source used in the
   load flow only (no short-circuit contribution).
 - Combined PDF report and CSV / Excel downloads.
