@@ -22,6 +22,11 @@ or one Excel form per equipment, or one Excel file for the whole network) and dr
   (flows and bus voltages) and the fault playback (fault point, currents, voltage dips and the tripping sequence in time),
   also downloadable as one HTML file. A FaultGuard incident is applied to the network with one button: the line is matched
   from the station names in the incident and the location is turned to the From end of the network line.
+- **Grid short-circuit power from disturbance records** (short-circuit page): at the relay bus the fault-caused voltage and current give
+  the source impedance behind the relay (V2 = −Zs·I2, V0 = −Zs0·I0, IEC 60909-0 equivalent source Sk = U²/|Zs|); the model gives the same
+  impedance with the faulted circuit out, and the short-circuit power and X0/X1 of the chosen grids are fitted until the model matches the records.
+- **Load-flow reference**: any grid or any bus can be the reference (slack); a bus without a grid gets a balancing source used in the
+  load flow only (no short-circuit contribution).
 - Combined PDF report and CSV / Excel downloads.
 
 ## Files
