@@ -14,6 +14,10 @@ or one Excel form per equipment, or one Excel file for the whole network) and dr
   and the fault location that best matches the measured currents.
 - **Verification** (internal, `tests/test_engine.py`; document on request or as a report appendix): IEEE 9 and 14 bus published load flow results,
   the IEC TR 60909-4 example network, IEC 60909 hand calculations and IEC 60255-151 relay curves.
+- **Equipment data from relay settings**: MiCOM .set files, a .zip of the settings project folder (the folder names give the circuit,
+  e.g. 41_EAST_NORTH), or settings exports (PDF, picture, Excel, CSV, TXT). Each file is put on its line and line end from the relay's own
+  station, the far end in its description and the circuit name; one button applies all recognised files, line data from the newest file
+  of each line and relay data from the newest file of each relay, and lines whose relays carry different line data are listed.
 - **3D view** of the network (three.js, runs in the browser, no internet needed): the network after it is built, the load flow
   (flows and bus voltages) and the fault playback (fault point, currents, voltage dips and the tripping sequence in time),
   also downloadable as one HTML file. A FaultGuard incident is applied to the network with one button: the line is matched
