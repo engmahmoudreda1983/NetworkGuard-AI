@@ -28,6 +28,8 @@ or one Excel form per equipment, or one Excel file for the whole network) and dr
   Every fault applied from FaultGuard (or read from records) does the same with its own records and offers the new grid values.
 - **Load-flow reference**: any grid or any bus can be the reference (slack); a bus without a grid gets a balancing source used in the
   load flow only (no short-circuit contribution).
+- **Missing values**: each analysis asks only for what it uses (load flow, voltage drop and N-1 do not need the grid fault levels); when
+  values are missing the page opens them in tables to fill and save right there.
 - Combined PDF report and CSV / Excel downloads.
 
 ## Files
