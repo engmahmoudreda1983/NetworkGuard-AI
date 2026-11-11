@@ -74,7 +74,8 @@ def scene_data(data, lf=None, fs=None, title='Network'):
         if lft is not None and br['id'] in lft.index:
             r.update(load=_f(lft.at[br['id'], 'Loading (%)'], 1), p=_f(lft.at[br['id'], 'P HV (MW)'], 1), st=str(lft.at[br['id'], 'Status']))
         trafos.append(r)
-    out = {'title': title, 'scale': round(S, 3), 'subs': subs, 'buses': buses, 'lines': lines, 'trafos': trafos,
+    import networkguard_plots as npl
+    out = {'title': title, 'scale': round(S, 3), 'bus_half': round(0.42 * S, 2), 'kvcol': {int(k): v for k, v in npl.KV_COL.items()}, 'subs': subs, 'buses': buses, 'lines': lines, 'trafos': trafos,
            'shunts': [{'id': s['id'], 'kind': s['kind'], 'bus': s['bus']} for s in lay['shunts'] if s['bus'] in pos],
            'sources': [{'id': s['id'], 'kind': s['kind'], 'bus': s['bus']} for s in lay['sources'] if s['bus'] in pos],
            'breakers': [{'id': b['id'], 'bus': b['bus'], 'el': b['element']} for b in lay['breakers'] if b['bus'] in pos]}
@@ -133,10 +134,11 @@ def _three():
         return f.read()
 
 
-def html(data, lf=None, fs=None, title='Network', subtitle=''):
-    """The 3D view as one self-contained HTML file (str)."""
+def html(data, lf=None, fs=None, title='Network', subtitle='', start='network'):
+    """The 3D view as one self-contained HTML file (str). start: 'network', 'lf' (load flow) or 'fault' (fault playback)."""
     sc = scene_data(data, lf, fs, title)
     sc['subtitle'] = subtitle
+    sc['start_mode'] = start
     with open(os.path.join(ASSETS, 'network3d.html'), encoding='utf-8') as f:
         t = f.read()
     js = json.dumps(sc, default=lambda o: o.item() if hasattr(o, 'item') else str(o)).replace('</', '<\\/')
